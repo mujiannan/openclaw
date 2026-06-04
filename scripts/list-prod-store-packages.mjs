@@ -5,6 +5,33 @@ import { parse } from "yaml";
 const parsed = JSON.parse(fs.readFileSync(0, "utf8"));
 const roots = Array.isArray(parsed) ? parsed : [parsed];
 const specs = new Set();
+const targetPlatform = {
+  cpu: process.env.OPENCLAW_RUNTIME_CPU || process.arch,
+  libc: process.env.OPENCLAW_RUNTIME_LIBC || (process.platform === "linux" ? "glibc" : undefined),
+  os: process.env.OPENCLAW_RUNTIME_OS || process.platform,
+};
+
+function constraintAllows(values, target) {
+  if (!Array.isArray(values) || values.length === 0 || !target) {
+    return true;
+  }
+  const positives = values.filter((value) => typeof value === "string" && !value.startsWith("!"));
+  const negatives = values
+    .filter((value) => typeof value === "string" && value.startsWith("!"))
+    .map((value) => value.slice(1));
+  if (negatives.includes(target)) {
+    return false;
+  }
+  return positives.length === 0 || positives.includes(target);
+}
+
+function packageSupportsTarget(pkg) {
+  return (
+    constraintAllows(pkg?.cpu, targetPlatform.cpu) &&
+    constraintAllows(pkg?.libc, targetPlatform.libc) &&
+    constraintAllows(pkg?.os, targetPlatform.os)
+  );
+}
 
 function packageSpec(name, version) {
   if (!name || !version || typeof version !== "string") {
@@ -53,9 +80,9 @@ function readLockfile() {
 }
 
 function addLockfilePackages(lockfile) {
-  for (const key of Object.keys(lockfile?.packages ?? {})) {
+  for (const [key, pkg] of Object.entries(lockfile?.packages ?? {})) {
     const spec = packageSpecFromLockfileKey(key);
-    if (spec) {
+    if (spec && packageSupportsTarget(pkg)) {
       specs.add(spec);
     }
   }
@@ -81,7 +108,7 @@ function addSnapshotClosure(lockfile) {
     }
     for (const [name, version] of Object.entries(snapshot.dependencies ?? {})) {
       const depSpec = packageSpec(name, typeof version === "string" ? version : version?.version);
-      if (!depSpec || !packages[depSpec] || specs.has(depSpec)) {
+      if (!depSpec || !packages[depSpec] || specs.has(depSpec) || !packageSupportsTarget(packages[depSpec])) {
         continue;
       }
       specs.add(depSpec);
@@ -94,6 +121,12 @@ for (const root of roots) {
   visitListNode(root);
 }
 const lockfile = readLockfile();
+for (const spec of [...specs]) {
+  const pkg = lockfile?.packages?.[spec];
+  if (pkg && !packageSupportsTarget(pkg)) {
+    specs.delete(spec);
+  }
+}
 addSnapshotClosure(lockfile);
 addLockfilePackages(lockfile);
 

@@ -139,7 +139,10 @@ RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/sto
     OPENCLAW_EXTENSIONS="$OPENCLAW_EXTENSIONS" OPENCLAW_BUNDLED_PLUGIN_DIR="$OPENCLAW_BUNDLED_PLUGIN_DIR" node scripts/prune-docker-plugin-dist.mjs && \
     node scripts/postinstall-bundled-plugins.mjs && \
     find dist -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.map' \) -delete && \
-    node scripts/check-package-dist-imports.mjs /app
+    node scripts/check-package-dist-imports.mjs /app && \
+    rm -rf node_modules/openclaw && \
+    ln -s .. node_modules/openclaw && \
+    node -e "const host=require('./package.json').version; const linked=require('./node_modules/openclaw/package.json').version; if (host !== linked) throw new Error('openclaw self link version mismatch: '+linked+' !== '+host)"
 
 # ── Runtime base image ──────────────────────────────────────────
 FROM ${OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE} AS base-runtime
